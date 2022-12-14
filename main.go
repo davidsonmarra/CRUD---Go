@@ -45,6 +45,10 @@ func rootBooks(w http.ResponseWriter, r *http.Request) {
 			searchBookById(w, r)
 		case "DELETE":
 			deleteBookById(w, r)
+		case "PUT":
+			updateBookById(w, r)
+		default:
+			fmt.Fprint(w, "Método não suportado")
 		}
 	} else {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -106,6 +110,40 @@ func deleteBookById(w http.ResponseWriter, r *http.Request) {
 			right := Books[i+1:]
 			Books = append(left, right...)
 			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+	}
+	w.WriteHeader(http.StatusNotFound)
+}
+
+func updateBookById(w http.ResponseWriter, r *http.Request) {
+	parts := strings.Split(r.URL.Path, "/")
+	id, err := strconv.Atoi(parts[2])
+
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	body, errorBody := ioutil.ReadAll(r.Body)
+	if errorBody != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	var newBook Book
+	errorJson := json.Unmarshal(body, &newBook)
+	newBook.Id = id
+
+	if errorJson != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	for i, book := range Books {
+		if book.Id == id {
+			Books[i] = newBook
+			json.NewEncoder(w).Encode(newBook)
 			return
 		}
 	}
