@@ -43,6 +43,8 @@ func rootBooks(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case "GET":
 			searchBookById(w, r)
+		case "DELETE":
+			deleteBookById(w, r)
 		}
 	} else {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -83,6 +85,27 @@ func searchBookById(w http.ResponseWriter, r *http.Request) {
 	for _, book := range Books {
 		if book.Id == id {
 			json.NewEncoder(w).Encode(book)
+			return
+		}
+	}
+	w.WriteHeader(http.StatusNotFound)
+}
+
+func deleteBookById(w http.ResponseWriter, r *http.Request) {
+	parts := strings.Split(r.URL.Path, "/")
+	id, err := strconv.Atoi(parts[2])
+
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	for i, book := range Books {
+		if book.Id == id {
+			left := Books[:i]
+			right := Books[i+1:]
+			Books = append(left, right...)
+			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 	}
