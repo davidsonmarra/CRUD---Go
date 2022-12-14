@@ -6,6 +6,8 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"strconv"
+	"strings"
 )
 
 type Book struct {
@@ -25,24 +27,34 @@ func mainHandle(w http.ResponseWriter, r *http.Request) {
 }
 
 func rootBooks(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case "GET":
-		getAllBooks(w, r)
-	case "POST":
-		createBook(w, r)
-	default:
-		fmt.Fprint(w, "Método não suportado")
+	w.Header().Set("Content-Type", "application/json")
+
+	parts := strings.Split(r.URL.Path, "/")
+	if len(parts) == 2 || len(parts) == 3 && parts[2] == "" {
+		switch r.Method {
+		case "GET":
+			getAllBooks(w, r)
+		case "POST":
+			createBook(w, r)
+		default:
+			fmt.Fprint(w, "Método não suportado")
+		}
+	} else if len(parts) == 3 || len(parts) == 4 && parts[3] == "" {
+		switch r.Method {
+		case "GET":
+			searchBookById(w, r)
+		}
+	} else {
+		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
 }
 
 func getAllBooks(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
 	encoder := json.NewEncoder(w)
 	encoder.Encode(Books)
 }
 
 func createBook(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 
 	body, err := ioutil.ReadAll(r.Body)
@@ -60,9 +72,29 @@ func createBook(w http.ResponseWriter, r *http.Request) {
 	encoder.Encode(newBook)
 }
 
+func searchBookById(w http.ResponseWriter, r *http.Request) {
+	parts := strings.Split(r.URL.Path, "/")
+
+	var id, err = strconv.Atoi(parts[2])
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	for _, book := range Books {
+		if book.Id == id {
+			json.NewEncoder(w).Encode(book)
+			return
+		}
+	}
+	w.WriteHeader(http.StatusNotFound)
+}
+
 func configHandles() {
 	http.HandleFunc("/", mainHandle)
 	http.HandleFunc("/books", rootBooks)
+
+	// e.g. GET /books/{id}
+	http.HandleFunc("/books/", rootBooks)
 }
 
 func configServer() {
