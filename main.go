@@ -28,13 +28,11 @@ func mainHandle(w http.ResponseWriter, r *http.Request) {
 }
 
 func getAllBooks(w http.ResponseWriter, r *http.Request) {
-	w.Header().Add("Content-Type", "application/json")
 	encoder := json.NewEncoder(w)
 	encoder.Encode(Books)
 }
 
 func createBook(w http.ResponseWriter, r *http.Request) {
-	w.Header().Add("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 
 	body, err := io.ReadAll(r.Body)
@@ -53,7 +51,6 @@ func createBook(w http.ResponseWriter, r *http.Request) {
 }
 
 func searchBookById(w http.ResponseWriter, r *http.Request) {
-	w.Header().Add("Content-Type", "application/json")
 	vars := mux.Vars(r)
 	id, err := strconv.Atoi(vars["id"])
 
@@ -72,7 +69,6 @@ func searchBookById(w http.ResponseWriter, r *http.Request) {
 }
 
 func deleteBookById(w http.ResponseWriter, r *http.Request) {
-	w.Header().Add("Content-Type", "application/json")
 	vars := mux.Vars(r)
 	id, err := strconv.Atoi(vars["id"])
 
@@ -99,7 +95,6 @@ func deleteBookById(w http.ResponseWriter, r *http.Request) {
 }
 
 func updateBookById(w http.ResponseWriter, r *http.Request) {
-	w.Header().Add("Content-Type", "application/json")
 	vars := mux.Vars(r)
 	id, err := strconv.Atoi(vars["id"])
 
@@ -142,8 +137,16 @@ func configHandles(router *mux.Router) {
 	router.HandleFunc("/books/{id}", deleteBookById).Methods("DELETE")
 }
 
+func jsonMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		next.ServeHTTP(w, r)
+	})
+}
+
 func configServer() {
 	router := mux.NewRouter().StrictSlash(true)
+	router.Use(jsonMiddleware)
 	configHandles(router)
 
 	fmt.Println("Servidor rodando na porta 1337")
