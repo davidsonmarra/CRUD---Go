@@ -1,6 +1,13 @@
 package main
 
 import (
+	"database/sql"
+	"os"
+
+	"github.com/joho/godotenv"
+
+	_ "github.com/go-sql-driver/mysql"
+
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,10 +24,18 @@ type Book struct {
 	Author string `json:"author"`
 }
 
-var Books []Book = []Book{
-	{Id: 1, Title: "O Senhor dos Aneis", Author: "J.R.R. Tolkien"},
-	{Id: 2, Title: "O Hobbit", Author: "J.R.R. Tolkien"},
-	{Id: 3, Title: "O Silmarillion", Author: "J.R.R. Tolkien"},
+type ErrorResponse struct {
+	Message string `json:"message"`
+}
+
+var db *sql.DB
+
+func init() {
+	err := godotenv.Load(".env")
+
+	if err != nil {
+		log.Fatal("Error loading .env file")
+	}
 }
 
 func mainHandle(w http.ResponseWriter, r *http.Request) {
@@ -28,26 +43,60 @@ func mainHandle(w http.ResponseWriter, r *http.Request) {
 }
 
 func getAllBooks(w http.ResponseWriter, r *http.Request) {
+	registers, err := db.Query("SELECT id, title, author FROM books")
+	if err != nil {
+		log.Println("❌  getAllBooks ==>" + err.Error())
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	var books []Book = make([]Book, 0)
+	for registers.Next() {
+		var book Book
+		err = registers.Scan(&book.Id, &book.Title, &book.Author)
+		if err != nil {
+			log.Println("❌  getAllBooks ==>" + err.Error())
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		books = append(books, book)
+	}
+	err = registers.Close()
+	if err != nil {
+		log.Println("❌  getAllBooks ==>" + err.Error())
+		return
+	}
+
 	encoder := json.NewEncoder(w)
-	encoder.Encode(Books)
+	encoder.Encode(books)
 }
 
 func createBook(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusCreated)
-
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		fmt.Printf("Error reading the body: %v\n", err)
+		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
 
 	var newBook Book
 	json.Unmarshal(body, &newBook)
-	newBook.Id = len(Books) + 1
-	Books = append(Books, newBook)
 
-	encoder := json.NewEncoder(w)
-	encoder.Encode(newBook)
+	if len(newBook.Title) == 0 || len(newBook.Author) == 0 {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		json.NewEncoder(w).Encode(ErrorResponse{"Title and Author are required"})
+		return
+	}
+
+	register, errRegister := db.Exec("INSERT INTO books (title, author) VALUES (?, ?)", newBook.Title, newBook.Author)
+
+	if errRegister != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	generateId, _ := register.LastInsertId()
+	newBook.Id = int(generateId)
+
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(newBook)
 }
 
 func searchBookById(w http.ResponseWriter, r *http.Request) {
@@ -59,13 +108,17 @@ func searchBookById(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	for _, book := range Books {
-		if book.Id == id {
-			json.NewEncoder(w).Encode(book)
-			return
-		}
+	register := db.QueryRow("SELECT id, title, author FROM books WHERE id = ?", id)
+	var book Book
+
+	err = register.Scan(&book.Id, &book.Title, &book.Author)
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		return
 	}
-	w.WriteHeader(http.StatusNotFound)
+
+	encoder := json.NewEncoder(w)
+	encoder.Encode(book)
 }
 
 func deleteBookById(w http.ResponseWriter, r *http.Request) {
@@ -77,21 +130,21 @@ func deleteBookById(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	register := db.QueryRow("SELECT id FROM books WHERE id = ?", id)
+	var bookId int
+	err = register.Scan(&bookId)
+
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
+		w.WriteHeader(http.StatusNotFound)
 		return
 	}
 
-	for i, book := range Books {
-		if book.Id == id {
-			left := Books[:i]
-			right := Books[i+1:]
-			Books = append(left, right...)
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
+	_, err = db.Exec("DELETE FROM books WHERE id = ?", id)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
 	}
-	w.WriteHeader(http.StatusNotFound)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func updateBookById(w http.ResponseWriter, r *http.Request) {
@@ -109,6 +162,15 @@ func updateBookById(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	register := db.QueryRow("SELECT id, title, author FROM books WHERE id = ?", id)
+	var book Book
+	err = register.Scan(&book.Id, &book.Title, &book.Author)
+
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+
 	var newBook Book
 	errorJson := json.Unmarshal(body, &newBook)
 	newBook.Id = id
@@ -118,14 +180,12 @@ func updateBookById(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	for i, book := range Books {
-		if book.Id == id {
-			Books[i] = newBook
-			json.NewEncoder(w).Encode(newBook)
-			return
-		}
+	_, err = db.Exec(("UPDATE books SET title = ?, author = ? WHERE id = ?"), newBook.Title, newBook.Author, newBook.Id)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
 	}
-	w.WriteHeader(http.StatusNotFound)
+	json.NewEncoder(w).Encode(newBook)
 }
 
 func configHandles(router *mux.Router) {
@@ -144,6 +204,28 @@ func jsonMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+func configDB() {
+	var err error
+	var connectionStr string = fmt.Sprintf(
+		"%s:%s@tcp(%s)/%s",
+		os.Getenv("DB_USER"),
+		os.Getenv("DB_PASSWORD"),
+		os.Getenv("DB_HOST"),
+		os.Getenv("DB_NAME"),
+	)
+	db, err = sql.Open("mysql", connectionStr)
+	if err != nil {
+		log.Fatal(err.Error())
+	}
+
+	errPing := db.Ping()
+	if errPing != nil {
+		log.Fatal(errPing.Error())
+	}
+
+	fmt.Println("✔️  Connected to database")
+}
+
 func configServer() {
 	router := mux.NewRouter().StrictSlash(true)
 	router.Use(jsonMiddleware)
@@ -154,5 +236,6 @@ func configServer() {
 }
 
 func main() {
+	configDB()
 	configServer()
 }
